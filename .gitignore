@@ -8,3 +8,5 @@ venv/
 *.egg-info/
 .DS_Store
 staticfiles/
+pipeline_data/
+fixtures/seed_data.json

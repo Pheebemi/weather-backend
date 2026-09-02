@@ -74,3 +74,47 @@ class WardFarmland(models.Model):
 
     def __str__(self):
         return f"{self.ward.name}: {'agric' if self.has_agric_land else 'no agric'}"
+
+
+class LGAFarmland(models.Model):
+    """
+    LGA-level fallback for Feature 2, for states where no ward boundaries
+    exist in any open source (Benue, Plateau, Taraba — see README). Same
+    ESA WorldCover computation as WardFarmland, just run against the LGA
+    polygon, so those states show real data instead of an empty tier.
+
+    Coarser than ward level and must be labelled as such in the UI.
+    """
+
+    lga = models.OneToOneField(LGA, on_delete=models.CASCADE, related_name="farmland")
+    has_agric_land = models.BooleanField()
+    cropland_percent = models.FloatField(
+        help_text="Percent of LGA area classified as Cropland by ESA WorldCover."
+    )
+    threshold_used = models.FloatField(default=10.0)
+    source = models.CharField(max_length=100, default="ESA WorldCover (satellite-derived, auto-generated)")
+    manually_corrected = models.BooleanField(default=False)
+    computed_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.lga.name} (LGA): {'agric' if self.has_agric_land else 'no agric'}"
+
+
+class FarmlandReport(models.Model):
+    """
+    A user-submitted "this looks wrong" flag for a ward's farmland result
+    (see CLAUDE.md "Correction strategy" / Build Guidance). Reviewed
+    manually — a supervisor reads these in /admin/ and, if the report is
+    correct, flips the matching WardFarmland row and marks this resolved.
+    """
+
+    ward = models.ForeignKey(Ward, on_delete=models.CASCADE, related_name="farmland_reports")
+    note = models.TextField(blank=True, help_text="Optional detail from the reporter.")
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Report on {self.ward.name} ({'resolved' if self.resolved else 'open'})"

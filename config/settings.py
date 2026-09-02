@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "boundaries",
     "weather_data",
+    "climate_pipeline",
 ]
 
 MIDDLEWARE = [
@@ -92,6 +93,12 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+# Behind a proxy (Render/Railway/Fly), trust the forwarded scheme.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+CSRF_TRUSTED_ORIGINS = [
+    o for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o
+]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
