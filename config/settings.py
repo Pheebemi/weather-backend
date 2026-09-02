@@ -8,11 +8,16 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-secret-key")
+# `or` rather than a get() default: an env var that exists but is empty
+# (easy to do in a hosting dashboard) would otherwise pass "" straight
+# through, and Django rejects an empty SECRET_KEY with ImproperlyConfigured.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or "dev-insecure-secret-key"
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
+DEBUG = (os.environ.get("DJANGO_DEBUG") or "true").lower() == "true"
 
-ALLOWED_HOSTS = [h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",") if h]
+ALLOWED_HOSTS = [
+    h for h in (os.environ.get("DJANGO_ALLOWED_HOSTS") or "*").split(",") if h.strip()
+]
 
 # Vercel assigns a new *.vercel.app hostname on every deploy (production and
 # each preview), so a fixed ALLOWED_HOSTS entry breaks on the next deploy.
@@ -108,7 +113,9 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOWED_ORIGINS = [
-    o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o
+    o
+    for o in (os.environ.get("CORS_ALLOWED_ORIGINS") or "http://localhost:3000").split(",")
+    if o.strip()
 ]
 
 # Same problem as ALLOWED_HOSTS: the frontend's Vercel preview/production
