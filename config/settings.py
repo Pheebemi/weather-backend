@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import dj_database_url
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,6 +13,16 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-secret-key")
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
 
 ALLOWED_HOSTS = [h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",") if h]
+
+# Vercel assigns a new *.vercel.app hostname on every deploy (production and
+# each preview), so a fixed ALLOWED_HOSTS entry breaks on the next deploy.
+# VERCEL=1 is set automatically on Vercel; VERCEL_URL is the current
+# deployment's own hostname. See https://vercel.com/docs/environment-variables
+if os.environ.get("VERCEL"):
+    ALLOWED_HOSTS.append(".vercel.app")
+    vercel_url = os.environ.get("VERCEL_URL")
+    if vercel_url and vercel_url not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(vercel_url)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -57,11 +68,15 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+# DATABASE_URL is how Neon (and most Postgres hosts) hand you a connection
+# string, e.g. postgresql://user:pass@host/dbname?sslmode=require. Falls back
+# to local SQLite when it's not set (e.g. plain local dev).
 DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
+    "default": dj_database_url.config(
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        conn_max_age=600,
+        ssl_require=not DEBUG,
+    )
 }
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -88,6 +103,12 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = [
     o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o
 ]
+
+# Same problem as ALLOWED_HOSTS: the frontend's Vercel preview/production
+# URLs change per deploy, so allow any *.vercel.app origin rather than
+# hardcoding one. Tighten this once you're on a custom domain.
+if os.environ.get("VERCEL"):
+    CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://.*\.vercel\.app$"]
 
 # NASA POWER API — see https://power.larc.nasa.gov/docs/services/api/
 NASA_POWER_BASE_URL = os.environ.get(

@@ -35,6 +35,27 @@ python manage.py runserver
 | `GET /api/weather/ward/<id>/` | Live NASA POWER weather for a ward's centroid |
 | `GET /api/wards/<id>/farmland/` | Pre-computed agricultural-land flag for a ward |
 
+## Deploying (Vercel + Neon)
+Vercel assigns a **new hostname on every deploy** (production and each
+preview), and Django's `ALLOWED_HOSTS`/CORS checks reject anything not on
+their allowlist by default — that shows up as an HTTP 400
+`DisallowedHost` error. `config/settings.py` handles this automatically
+when `VERCEL=1` is set (Vercel sets it for you): it allows any
+`*.vercel.app` host/origin. You don't need to add each generated URL by
+hand; set `DJANGO_ALLOWED_HOSTS`/`CORS_ALLOWED_ORIGINS` only once you're on
+a custom domain.
+
+For the database, `DATABASES` reads `DATABASE_URL` (via `dj-database-url`)
+and falls back to local SQLite when it's unset. In the Vercel project's
+Environment Variables settings, add:
+```
+DATABASE_URL=<Neon's pooled connection string, includes ?sslmode=require>
+DJANGO_SECRET_KEY=<a real secret, not the dev default>
+DJANGO_DEBUG=false
+```
+Then run migrations against Neon once (locally, pointed at the same
+`DATABASE_URL`, or via a Vercel deploy hook): `python manage.py migrate`.
+
 ## Boundary data (TODO — replace placeholder seed)
 `seed_boundaries` only inserts a handful of demo wards so the app runs
 end-to-end locally. For real coverage, import GRID3 (data.grid3.org) or HDX
