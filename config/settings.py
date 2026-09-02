@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "boundaries",
     "weather_data",
+    "climate_pipeline",
 ]
 
 MIDDLEWARE = [

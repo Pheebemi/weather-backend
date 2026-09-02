@@ -10,8 +10,13 @@ Farmland app. See `CLAUDE.md` for the full project background.
 
 ## Apps
 - `boundaries` — State → LGA → Ward reference data, plus `WardFarmland`
-  (Feature 2's pre-computed cropland flag).
-- `weather_data` — Feature 1: live NASA POWER lookups by point or by ward.
+  (Feature 2's pre-computed cropland flag) and `FarmlandReport` (user
+  "report incorrect info" submissions).
+- `weather_data` — Feature 1: weather lookup by point or by ward. Prefers
+  `climate_pipeline.WardClimate` (precomputed) when available, falls back
+  to a live NASA POWER call otherwise.
+- `climate_pipeline` — Supervisor's formal 4-step data-prep pipeline (see
+  CLAUDE.md): offline scripts that populate `WardClimate`.
 
 ## Setup
 ```bash
@@ -19,8 +24,9 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 python manage.py migrate
-python manage.py seed_boundaries   # placeholder demo boundaries
-python manage.py createsuperuser   # optional, for /admin/
+python manage.py import_boundaries --download --reset  # real HDX boundaries
+python manage.py compute_farmland                      # real ESA WorldCover flags (~25 min)
+python manage.py createsuperuser                       # optional, for /admin/
 python manage.py runserver
 ```
 
@@ -32,21 +38,93 @@ python manage.py runserver
 | `GET /api/states/<id>/lgas/` | List LGAs in a state |
 | `GET /api/lgas/<id>/wards/` | List wards in an LGA |
 | `GET /api/weather/?lat=&lon=` | Live NASA POWER weather for a point (e.g. a map tap) |
-| `GET /api/weather/ward/<id>/` | Live NASA POWER weather for a ward's centroid |
+| `GET /api/weather/ward/<id>/` | Weather for a ward — precomputed `WardClimate` if the pipeline has covered it, otherwise a live NASA POWER call |
 | `GET /api/wards/<id>/farmland/` | Pre-computed agricultural-land flag for a ward |
+| `POST /api/wards/<id>/farmland/report/` | Flag a ward's farmland result as wrong (`{"note": "..."}`, note optional) — reviewed manually in `/admin/` |
 
-## Boundary data (TODO — replace placeholder seed)
-`seed_boundaries` only inserts a handful of demo wards so the app runs
-end-to-end locally. For real coverage, import GRID3 (data.grid3.org) or HDX
-(data.humdata.org) State/LGA/Ward shapefiles: for each ward, compute a
-centroid (lat/lon) and load `State`/`LGA`/`Ward` rows from it. Verify
-ward-level coverage per target state before relying on it.
+## Boundary data (real)
+`import_boundaries --download` pulls the HDX Common Operational Dataset
+(UN OCHA, "Nigeria - Subnational Administrative Boundaries") — free, no
+authentication — and loads real `State`/`LGA`/`Ward` rows with real
+centroids for the 19 northern states.
 
-## Farmland flag batch job (TODO)
-Feature 2's `WardFarmland` rows are meant to be populated by a one-time,
-offline script (not included yet) that, per ward boundary, computes the
-percent of ward area ESA WorldCover classifies as "Cropland" (via Google
-Earth Engine or Digital Earth Africa) and applies a threshold (~10-15%,
-tune by spot-checking known wards). Corrections after launch are reactive:
-flip `WardFarmland.manually_corrected` and `has_agric_land` by hand when a
-ward is reported wrong.
+⚠️ **Ward coverage is partial.** HDX admin3 (ward) data currently exists
+only for **Borno, Adamawa and Yobe** (714 wards). The other 16 northern
+states import with State + LGA rows but no wards, so they have no
+ward-level farmland lookup until GRID3 ward boundaries are obtained for
+them. This matches the coverage caveat in CLAUDE.md.
+
+## Farmland flag batch job (real)
+`compute_farmland` is Feature 2's real batch job. For each ward polygon it
+computes the percent of ward area that ESA WorldCover v200 (2021, 10m)
+classifies as Cropland, applies a threshold (default 10%), and writes the
+flag to `WardFarmland`.
+
+WorldCover tiles are public Cloud-Optimized GeoTIFFs on AWS Open Data — no
+Google Earth Engine account or credentials are needed, and only the pixels
+covering each ward are fetched over HTTP range requests. A full run over
+714 wards takes roughly 25 minutes; `--skip-existing` resumes an
+interrupted run and `--limit N` is useful for spot checks.
+
+Tune the threshold by spot-checking known wards (`--threshold 15`).
+Corrections after launch are reactive: either flip
+`WardFarmland.manually_corrected`/`has_agric_land` by hand, or review
+submissions in `FarmlandReport` (populated via the "report incorrect info"
+endpoint above) in `/admin/`.
+
+## Climate data-prep pipeline
+`climate_pipeline` implements the Supervisor's formal 4-step pipeline from
+CLAUDE.md as Django management commands under
+`climate_pipeline/management/commands/`. Each step writes/reads files under
+`pipeline_data/` (gitignored) and the last step writes directly to the
+`WardClimate` table via the ORM.
+
+```bash
+python manage.py fetch_cmip6            # download the downscaled CMIP6 input
+python manage.py run_climate_pipeline   # then Steps 1-4
+```
+
+### Climate input: NEX-GDDP-CMIP6
+`fetch_cmip6` pulls **NASA Earth Exchange Global Daily Downscaled
+Projections (NEX-GDDP-CMIP6)** — raw CMIP6 GCM output (~100-250km) put
+through BCSD statistical downscaling and bias correction to **0.25°
+(~25km)**. This is the "downscaled/bias-corrected CMIP6 product" Step 2
+calls for rather than raw CMIP6.
+
+It reads the monthly **ensemble-median** Cloud-Optimized GeoTIFFs (the
+median across downscaled models — more defensible than one cherry-picked
+GCM; `p10`/`p90` files exist on the same bucket for uncertainty bands).
+Public AWS Open Data, CC0, no credentials. Only Nigeria's window of each
+global file is fetched via HTTP range requests.
+
+Defaults: scenario `ssp245`, period `2026-2035`, variables `tas`,
+`tasmax`, `hurs`, `pr`. CMIP6 ships Kelvin and the fetch converts units,
+with a plausibility check per variable so bad units cannot silently reach
+the database.
+
+Everything is stored locally — `pipeline_data/cmip6_nigeria.nc`, then
+clipped to `climate_grid.nc`, then one `WardClimate` row per ward. The
+running app never calls AWS; it reads the database.
+
+⚠️ **`WardClimate` is a projection, not an observation.** The weather API
+therefore always returns live NASA POWER as the observed conditions and
+attaches the CMIP6 figures separately under `climate`, labelled with
+their scenario and period. Never render a projection as today's weather.
+
+At 25km, wards smaller than a grid cell share a value. Finer products
+exist (CHELSA/ClimateAF at ~1km) but are climatologies, not
+present-and-future time series.
+
+Steps can also be run individually (`step1_delineate_boundary`,
+`step2_extract_climate`, `step3_filter_wards_by_lulc`,
+`step4_resample_to_wards`) — see each command's module docstring for its
+arguments. `weather_data.views.WeatherByWardView` reads `WardClimate` first
+and only falls back to a live NASA POWER call for wards the pipeline
+hasn't covered, per CLAUDE.md.
+
+Note: Step 1's boundary refinement against satellite imagery and Step 3's
+LULC classification against a real ESA WorldCover raster are scaffolded
+with real geopandas/rasterio/xarray/rioxarray logic, but still need real
+GRID3/HDX/CMIP6/WorldCover inputs (and, for GEE-hosted WorldCover, Earth
+Engine credentials) to produce production data — `--demo` mode exists so
+the pipeline's wiring can be verified without them.
