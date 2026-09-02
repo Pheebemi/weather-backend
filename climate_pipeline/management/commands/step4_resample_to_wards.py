@@ -88,14 +88,14 @@ class Command(BaseCommand):
 
             WardClimate.objects.update_or_create(
                 ward=ward,
+                scenario=scenario,
+                period=period,
                 defaults={
                     "temperature_avg_c": values["tas"],
                     "precipitation_avg_mm": values["pr"],
                     "temperature_max_avg_c": values["tasmax"],
                     "humidity_avg_pct": values["hurs"],
                     "climate_source": source,
-                    "scenario": scenario,
-                    "period": period,
                 },
             )
             written += 1

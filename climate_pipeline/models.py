@@ -11,13 +11,16 @@ class WardClimate(models.Model):
     ward boundaries that survived the Step 3 LULC filter (agricultural or
     forested wards only).
 
-    A ward only gets a row here once it has been through the full pipeline.
-    weather_data/views.py prefers this precomputed value over a live NASA
-    POWER call when a row exists; live NASA POWER remains the fallback for
-    wards the pipeline hasn't covered.
+    One row per ward *per scenario and period*, so a ward can hold both a
+    near-term and a later projection and the app can show how its climate
+    changes between them.
+
+    These are projections, not observations. weather_data/views.py returns
+    them alongside live NASA POWER under their own key, never as today's
+    weather.
     """
 
-    ward = models.OneToOneField(Ward, on_delete=models.CASCADE, related_name="climate")
+    ward = models.ForeignKey(Ward, on_delete=models.CASCADE, related_name="climates")
     temperature_avg_c = models.FloatField(
         help_text="Area-weighted annual mean temperature from the downscaled CMIP6 grid."
     )
@@ -43,6 +46,10 @@ class WardClimate(models.Model):
         max_length=20, blank=True, help_text="Projection period, e.g. 2026-2035."
     )
     pipeline_run_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("ward", "scenario", "period")
+        ordering = ["period"]
 
     def __str__(self):
         return f"{self.ward.name}: {self.temperature_avg_c}°C / {self.precipitation_avg_mm}mm"
