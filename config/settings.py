@@ -1,17 +1,33 @@
 import os
 from pathlib import Path
 
+import dj_database_url
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-insecure-secret-key")
+# `or` rather than a get() default: an env var that exists but is empty
+# (easy to do in a hosting dashboard) would otherwise pass "" straight
+# through, and Django rejects an empty SECRET_KEY with ImproperlyConfigured.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY") or "dev-insecure-secret-key"
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
+DEBUG = (os.environ.get("DJANGO_DEBUG") or "true").lower() == "true"
 
-ALLOWED_HOSTS = [h for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "*").split(",") if h]
+ALLOWED_HOSTS = [
+    h for h in (os.environ.get("DJANGO_ALLOWED_HOSTS") or "*").split(",") if h.strip()
+]
+
+# Vercel assigns a new *.vercel.app hostname on every deploy (production and
+# each preview), so a fixed ALLOWED_HOSTS entry breaks on the next deploy.
+# VERCEL=1 is set automatically on Vercel; VERCEL_URL is the current
+# deployment's own hostname. See https://vercel.com/docs/environment-variables
+if os.environ.get("VERCEL"):
+    ALLOWED_HOSTS.append(".vercel.app")
+    vercel_url = os.environ.get("VERCEL_URL")
+    if vercel_url and vercel_url not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(vercel_url)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -29,7 +45,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -59,27 +74,16 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Postgres (e.g. Neon) in production via DATABASE_URL; SQLite locally.
-# Neon requires TLS, so sslmode=require is forced when a URL is supplied.
-DATABASE_URL = os.environ.get("DATABASE_URL")
-if DATABASE_URL:
-    import dj_database_url
-
-    DATABASES = {
-        "default": dj_database_url.parse(
-            DATABASE_URL,
-            conn_max_age=600,
-            conn_health_checks=True,
-            ssl_require=True,
-        )
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+# DATABASE_URL is how Neon (and most Postgres hosts) hand you a connection
+# string, e.g. postgresql://user:pass@host/dbname?sslmode=require. Falls back
+# to local SQLite when it's not set (e.g. plain local dev).
+DATABASES = {
+    "default": dj_database_url.config(
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        conn_max_age=600,
+        ssl_require=not DEBUG,
+    )
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -95,11 +99,6 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
-}
-
 # Behind a proxy (Render/Railway/Fly), trust the forwarded scheme.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 CSRF_TRUSTED_ORIGINS = [
@@ -114,8 +113,16 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOWED_ORIGINS = [
-    o for o in os.environ.get("CORS_ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o
+    o
+    for o in (os.environ.get("CORS_ALLOWED_ORIGINS") or "http://localhost:3000").split(",")
+    if o.strip()
 ]
+
+# Same problem as ALLOWED_HOSTS: the frontend's Vercel preview/production
+# URLs change per deploy, so allow any *.vercel.app origin rather than
+# hardcoding one. Tighten this once you're on a custom domain.
+if os.environ.get("VERCEL"):
+    CORS_ALLOWED_ORIGIN_REGEXES = [r"^https://.*\.vercel\.app$"]
 
 # NASA POWER API — see https://power.larc.nasa.gov/docs/services/api/
 NASA_POWER_BASE_URL = os.environ.get(
