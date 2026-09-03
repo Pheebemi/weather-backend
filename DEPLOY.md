@@ -51,11 +51,12 @@ python manage.py migrate
 
 All 12,097 rows — boundaries, farmland flags and ward climate — are
 committed as a compressed fixture, so production does not need to re-run
-the satellite jobs:
+the satellite jobs. Use fast_loaddata, not loaddata — stock loaddata does
+one INSERT per row, which over a remote connection takes hours:
 
 ```bash
 DATABASE_URL='...' python manage.py migrate
-DATABASE_URL='...' python manage.py loaddata fixtures/seed_data.json.gz
+DATABASE_URL='...' python manage.py fast_loaddata fixtures/seed_data.json.gz
 ```
 
 Regenerate it after a pipeline re-run:
