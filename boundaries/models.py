@@ -16,6 +16,10 @@ class LGA(models.Model):
     state = models.ForeignKey(State, on_delete=models.CASCADE, related_name="lgas")
     name = models.CharField(max_length=100)
     code = models.CharField(max_length=30, unique=True)
+    # Centroid, used to resolve an LGA to a point for the weather forecast
+    # in states that have no ward boundaries (Benue, Plateau, Taraba).
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
 
     class Meta:
         ordering = ["name"]

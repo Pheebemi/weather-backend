@@ -7,6 +7,16 @@ from django.conf import settings
 # RH2M = relative humidity at 2m (%). See https://power.larc.nasa.gov/docs/services/api/
 POWER_PARAMETERS = "T2M,T2M_MAX,T2M_MIN,PRECTOTCORR,RH2M"
 
+# NASA POWER uses -999 as its "no value" sentinel. Passed through untouched
+# it renders as a real reading (-999.0 °C), so it must become None.
+POWER_FILL_VALUE = -999.0
+
+
+def _clean(value):
+    if value is None or value <= POWER_FILL_VALUE:
+        return None
+    return value
+
 
 class NasaPowerError(Exception):
     pass
@@ -46,11 +56,11 @@ def fetch_recent_weather(latitude: float, longitude: float, days: int = 7) -> di
     daily = [
         {
             "date": datetime.strptime(date, "%Y%m%d").date().isoformat(),
-            "temperature_avg_c": parameter_data.get("T2M", {}).get(date),
-            "temperature_max_c": parameter_data.get("T2M_MAX", {}).get(date),
-            "temperature_min_c": parameter_data.get("T2M_MIN", {}).get(date),
-            "precipitation_mm": parameter_data.get("PRECTOTCORR", {}).get(date),
-            "relative_humidity_pct": parameter_data.get("RH2M", {}).get(date),
+            "temperature_avg_c": _clean(parameter_data.get("T2M", {}).get(date)),
+            "temperature_max_c": _clean(parameter_data.get("T2M_MAX", {}).get(date)),
+            "temperature_min_c": _clean(parameter_data.get("T2M_MIN", {}).get(date)),
+            "precipitation_mm": _clean(parameter_data.get("PRECTOTCORR", {}).get(date)),
+            "relative_humidity_pct": _clean(parameter_data.get("RH2M", {}).get(date)),
         }
         for date in dates
     ]
@@ -60,5 +70,8 @@ def fetch_recent_weather(latitude: float, longitude: float, days: int = 7) -> di
         "longitude": longitude,
         "source": "NASA POWER (~50km grid cell average, not exact-point)",
         "daily": daily,
-        "latest": daily[-1] if daily else None,
+        # Skip trailing days POWER has not filled in yet.
+        "latest": next(
+            (d for d in reversed(daily) if d["temperature_avg_c"] is not None), None
+        ),
     }

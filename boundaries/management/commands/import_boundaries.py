@@ -82,7 +82,12 @@ class Command(BaseCommand):
                     continue
                 lga, _ = LGA.objects.update_or_create(
                     code=row["adm2_pcode"],
-                    defaults={"name": row["adm2_name"], "state": state},
+                    defaults={
+                        "name": row["adm2_name"],
+                        "state": state,
+                        "latitude": row["center_lat"],
+                        "longitude": row["center_lon"],
+                    },
                 )
                 lgas[row["adm2_pcode"]] = lga
 

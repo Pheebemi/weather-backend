@@ -53,3 +53,32 @@ class WardClimate(models.Model):
 
     def __str__(self):
         return f"{self.ward.name}: {self.temperature_avg_c}°C / {self.precipitation_avg_mm}mm"
+
+
+class LGAClimate(models.Model):
+    """
+    LGA-level climate for states with no ward boundaries (Benue, Plateau,
+    Taraba). Same resample as WardClimate, run against the LGA polygon, so
+    those states show real figures instead of an empty screen.
+
+    Coarser than a ward result and labelled as such in the UI.
+    """
+
+    lga = models.ForeignKey(
+        "boundaries.LGA", on_delete=models.CASCADE, related_name="climates"
+    )
+    temperature_avg_c = models.FloatField()
+    precipitation_avg_mm = models.FloatField()
+    temperature_max_avg_c = models.FloatField(null=True, blank=True)
+    humidity_avg_pct = models.FloatField(null=True, blank=True)
+    climate_source = models.CharField(max_length=200, default="")
+    scenario = models.CharField(max_length=20, blank=True)
+    period = models.CharField(max_length=20, blank=True)
+    pipeline_run_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("lga", "scenario", "period")
+        ordering = ["period"]
+
+    def __str__(self):
+        return f"{self.lga.name} (LGA): {self.temperature_avg_c}°C"
