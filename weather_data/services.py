@@ -7,28 +7,32 @@ from django.conf import settings
 # RH2M = relative humidity at 2m (%). See https://power.larc.nasa.gov/docs/services/api/
 POWER_PARAMETERS = "T2M,T2M_MAX,T2M_MIN,PRECTOTCORR,RH2M"
 
-# NASA POWER uses -999 as its "no value" sentinel. Passed through untouched
-# it renders as a real reading (-999.0 °C), so it must become None.
-POWER_FILL_VALUE = -999.0
-
-
-def _clean(value):
-    if value is None or value <= POWER_FILL_VALUE:
-        return None
-    return value
+# NASA POWER's documented sentinel for "not yet processed / unavailable" — it
+# fills every requested parameter with exactly -999 rather than omitting the
+# date. Its real reporting lag varies (often longer than a couple of days),
+# so a request can land entirely on unfilled days; treat the value as
+# missing rather than showing "-999.0°C" as if it were a real reading.
+FILL_VALUE_THRESHOLD = -900
 
 
 class NasaPowerError(Exception):
     pass
 
 
-def fetch_recent_weather(latitude: float, longitude: float, days: int = 7) -> dict:
+def _clean(value):
+    if value is None or value <= FILL_VALUE_THRESHOLD:
+        return None
+    return value
+
+
+def fetch_recent_weather(latitude: float, longitude: float, days: int = 12) -> dict:
     """
     Query NASA POWER for the last `days` days of daily weather at a point.
-    NASA POWER has a short reporting lag, so request a small window ending a
-    few days back rather than "today".
+    NASA POWER's reporting lag is variable, so request a wider window ending
+    a few days back rather than "today", and let the caller fall back to the
+    most recent day that actually has data (see `latest` below).
     """
-    end = datetime.utcnow().date() - timedelta(days=3)
+    end = datetime.utcnow().date() - timedelta(days=4)
     start = end - timedelta(days=days - 1)
 
     params = {
@@ -65,13 +69,18 @@ def fetch_recent_weather(latitude: float, longitude: float, days: int = 7) -> di
         for date in dates
     ]
 
+    # NASA POWER's lag means the newest requested days are often still
+    # unfilled — walk backward to the most recent day with a real reading
+    # rather than always showing the last (possibly all-null) day.
+    latest = next(
+        (day for day in reversed(daily) if day["temperature_avg_c"] is not None),
+        None,
+    )
+
     return {
         "latitude": latitude,
         "longitude": longitude,
         "source": "NASA POWER (~50km grid cell average, not exact-point)",
         "daily": daily,
-        # Skip trailing days POWER has not filled in yet.
-        "latest": next(
-            (d for d in reversed(daily) if d["temperature_avg_c"] is not None), None
-        ),
+        "latest": latest,
     }
